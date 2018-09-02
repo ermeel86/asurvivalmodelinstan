@@ -1,0 +1,252 @@
+---
+title: "A Survival Model in Stan"
+author: "Eren Metin Elçi"
+date: 2018-09-03
+output:
+  tufte::tufte_html: default
+  tufte::tufte_handout: default
+---
+
+The goal of this short case study is to demonstrate the essentials of a Bayesian workflow using the probabilistic programming language Stan. The dataset we consider here is known as the mastectomy dataset^[This case study is motivated by Austin Rochford's related PyMC3 [blog post](https://austinrochford.com/posts/2015-10-05-bayes-survival.html). See also [this](https://docs.pymc.io/notebooks/bayes_param_survival_pymc3.html) updated version, now part of the official PyMC3 documentation. The same dataset was also studied by the same author in [this](https://docs.pymc.io/notebooks/survival_analysis.html) related case study.]. As the title already suggest, we will implement the simplest, and probably most commonly used survival model, also sometimes known as (Cox's) proportional hazard model. 
+
+The beauty or advantage of the Bayesian framework is that we can avoid any technicality or approximation due to what is known as *ties* in the dataset, usually encountered in the frequentist frameworks (see e.g. `coxph`). This is because we model the baseline hazard explicitly and hence do not need to revert to what is known as a pseudo-likelihood^[For a good and concise description of the frequentist approach and the utilized pseudo-likelihood, see chapter 9.4 and the related appendix in [Computer Age Statistical Inference](https://web.stanford.edu/~hastie/CASI/index.html) by Efron and Hastie.].
+
+Now, let's first have a look at the data:
+
+```{r, include=FALSE}
+library(HSAUR)
+library(tibble)
+library(dplyr)
+data("mastectomy")
+df <- as.tibble(mastectomy)
+df <- df %>% mutate(metastized=as.double(metastized=="yes"))
+```
+
+```{r, echo=FALSE}
+knitr::kable(
+  head(df,10), caption = 'A mastectomy dataset'
+)
+```
+
+More precisely, each row in the dataset represents observations from a woman diagnosed with breast cancer that underwent a mastectomy. 
+  
+  - The column `time` represents the time (in months) post-surgery that the woman was observed. 
+  - The column `event` indicates whether or not the woman died during the observation period. 
+  - The column `metastized` represents whether the cancer had metastized^[The cancers are classified as having metastized or not based on a histochemical marker.] prior to surgery.
+
+# Some math (some notation)
+
+Central to survival models is the survival function $S(t)$ defined as 
+
+$$ S(t) = \mathbb{P}[T>t] = e^{-H(t)} $$
+Here $T$ is a the survival time of an individual and thus $T>t$ denotes the event that the patient or individual survived beyond time $t$. $H(t)$ is known as the cumulative hazard and can be shown to be given by
+
+$$
+H(t) = \int_{0}^{t}{\rm d}u~\lambda(u)
+$$
+
+Here we introduced^[We discard the dependence on latent parameters such as $\mathbf{\beta}$ or $\gamma$ below, for the sake of readability.] the hazard rate $\lambda(t)$
+
+$$
+h(t;\mathbf{x}) = h_0(t) e^{\mathbf{x}'\cdot\boldsymbol{\beta}}
+$$
+
+Here $\mathbf{x}$ is a vector of covariates describing an individual^[In our mastectomy dataset it is simply a scalar indicator corresponding to the column `metastized` above.]. The above makes it apparent why such models are often referred to as *proportional* hazard models. Further, we make the assumption that the baseline hazard $h_0$ fulfills 
+
+$$h_0(t) = h_0.$$
+
+Our Bayesian analysis therefore has the unknown parameters $\boldsymbol{\beta}$ and $h_0$ where we parametrize the latter as $h_0 = e^\gamma$. 
+Note that the above implies (or is equivalent to) $T$ having an exponential law with rate parameter equal to $\exp{(\mathbf{x}'\cdot \boldsymbol{\beta}+ \gamma)}$.
+
+For the keen reader, try to verify (or convince yourself) that one has in the limit $dt\rightarrow 0$
+
+$$
+h(t)dt \doteq \mathbb{P}\left[T\in (t,t+dt) \vert T\geq t\right]
+$$
+
+
+# Stan
+
+Now let's get our hands dirty (or actually our keyboard) and start specifying our corresponding generative model in Stan!
+
+## Data block
+
+Here we define precisely the type and dimensions of data provided externally^[E.g. via rstan, pystan or cmdstan.] to Stan.
+```{rstan  data_block}
+data {
+    int<lower=0> N_uncensored;                                      
+    int<lower=0> N_censored;                                        
+    int<lower=1> NC;                                                
+    matrix[N_censored,NC] X_censored;                               
+    matrix[N_uncensored,NC] X_uncensored;                           
+    vector<lower=0>[N_censored] times_censored;                          
+    vector<lower=0>[N_uncensored] times_uncensored;                      
+}
+```
+
+## Parameters block
+
+Here we define all parameters that we wish to infer.
+
+```{rstan  parameters_block}
+parameters {
+    vector[NC] betas;                                     
+    real intercept;                                 
+}
+```
+
+Note that `betas` corresponds to $\boldsymbol{\beta}$ and `intercept` to $\gamma$.
+
+## Model block
+
+Here we define the likelihood and priors. Before we do so, I'd like to quote [Jonah Gabry](http://iserp.columbia.edu/people/jonah-gabry):
+
+> "Choosing priors is about including information while allowing the chance of being wrong."
+
+In this sense, let's hack the model block:
+
+```{rstan model_block}
+model {
+    betas ~ normal(0,2);                                                            
+    intercept ~ normal(-5,2);                                                     
+    target += exponential_lpdf(times_uncensored | exp(intercept+X_uncensored*betas)); 
+    target += exponential_lccdf(times_censored | exp(intercept+X_censored*betas));  
+}
+```
+
+To get an intuition for the prior choice of `intercept` or actually $\gamma$, observe that $e^{-\gamma}$ is equal to the mean of baseline exponential (which in the data is around $100$, hence $\gamma\approx 4.6$).
+
+Note that implicit here is the assumption that survival times are mutually independent. 
+
+Moreover, above we use *vectorized* statements, which makes the computation more efficient than using, say, a for loop and iterating over all individuals. This is the main reason why we decided to work with the `_censored` and `_uncensored` suffixes and split the data, as opposed to the variant where one keeps the data together and provides an boolean array/vector specifying which patients have a (right-) censored survival time.
+
+## Model compilation
+
+```{r  model_compile, message=FALSE}
+library(rstan)
+rstan_options(auto_write = TRUE)
+sm <- stan_model("./exponential_survival_simple.stan")
+```
+
+# Data preparation
+
+```{r data_prep, message=FALSE}
+N <- nrow(df)
+X <- as.matrix(pull(df, metastized))
+is_censored <- pull(df,event)==0
+times <- pull(df,time)
+msk_censored <- is_censored == 1
+N_censored <- sum(msk_censored)
+```
+
+Combine (couple) all the data into one named list with reference names corresponding precisely to the actual names as defined in the data block of our Stan model.
+```{r stan_list, message=FALSE}
+stan_data <- list(N_uncensored=N-N_censored, 
+                  N_censored=N_censored, 
+                  X_censored=as.matrix(X[msk_censored,]),
+                  X_uncensored=as.matrix(X[!msk_censored,]),
+                  times_censored=times[msk_censored],
+                  times_uncensored = times[!msk_censored],
+                  NC=ncol(X)
+)
+```
+
+# Fitting the model
+```{r stan_fit, message=FALSE}
+fit <- sampling(sm, data=stan_data, seed=42, chains=4, cores=2, iter=4000)
+```
+
+# Inspecting results
+
+Consider especially the `ess` and `rhat` columns below, which correspond to the effective sample size and the potential scale reduction statistics. In a nutshell, `rhat` should be very close to $1$ which indicates that the chain(s) mixed (converges) and `ess` should be as close as possible to the total number of MCMC iterations^[Starting in Stan 2.18 `ess` can in fact be larger than the number of MCMC iterations, essentially due to what is known as anti-correlations (yes NUTS and HMC can sometimes be unbelievable super-efficient!). For more details on the two quantities see the section [General MCMC diagnostics](http://mc-stan.org/bayesplot/articles/visual-mcmc-diagnostics.html#general-mcmc-diagnostics) in the bayesplot vignette [Visual MCMC diagnostics using the bayesplot package
+](http://mc-stan.org/bayesplot/articles/visual-mcmc-diagnostics.html). For a detailed example regarding the updates on `ess` and `rhat` in 2.18 I can highly recommend Aki Vehtari's [Rank-normalized split-Rhat and relative efficiency estimates](https://avehtari.github.io/rhat_neff/rhat_neff.html)] (excluding burn-in).
+
+```{r inspect_fit_mcmc, echo=FALSE}
+library(broom)
+knitr::kable(
+ tidy(fit, conf.int = TRUE, estimate.method = "median",rhat=TRUE, ess=TRUE),
+ caption = 'Posterior summary'
+)
+```
+
+```{r inspect_fit_nuts, echo=FALSE}
+check_divergences(fit)
+check_treedepth(fit)
+```
+
+## Visual inspection of the posterior
+
+```{r prep_visual, message=FALSE}
+library(bayesplot)
+library(survival)
+post <- as.array(fit)
+fit_cox <- coxph( Surv(time, event)~metastized, data=df)
+coef_cox <- coef(fit_cox)
+se_cox <- sqrt(fit_cox$var)
+```
+
+### Kernel density plots of posterior draws with chains separated but overlaid on a single plot.
+
+```{r visual_inspect_1, message=FALSE}
+mcmc_dens_overlay(post, pars=c("betas[1]", "intercept")) 
+```
+
+### Plots of uncertainty intervals computed from posterior draws with all chains merged.
+
+The three vertical lines below (from left to right) correspond to the frequentist's^[Using the `coxph` routine in the survival package, see the code of this RMarkdown.] point estimate minus the standard error, the point estimate and the point estimate plus the standard error of the regression coefficient, respectively. 
+
+```{r visual_inspect_2, message=FALSE}
+mcmc_intervals(post, pars=c("betas[1]", "intercept")) + 
+  vline_at(c(coef_cox-se_cox, coef_cox, coef_cox+se_cox))
+```
+
+### Pairs plot
+```{r visual_inspect_3, message=FALSE}
+color_scheme_set("red")
+mcmc_pairs(post, pars=c("betas[1]", "intercept"))
+```
+
+### Hex plot
+```{r visual_inspect_4, message=FALSE}
+color_scheme_set("gray")
+mcmc_hex(post, pars=c("betas[1]", "intercept"))
+```
+
+### Trace plot
+```{r visual_inspect_5, message=FALSE}
+color_scheme_set("mix-blue-red")
+mcmc_trace(post, pars=c("betas[1]", "intercept"),
+           facet_args = list(ncol = 1, strip.position = "left")
+           )
+```
+
+# Kaplan Meier plot
+```{r kaplan_meier, echo=FALSE}
+library(purrr)
+lambda_base = as.vector(exp(post[,,"intercept"]))
+lambda_metastized = lambda_base * as.vector(exp(post[,,"betas[1]"]))
+times_plot <- seq(0, max(times), length.out = 1000)
+surv_base <- map(times_plot, ~exp(-.*lambda_base))
+surv_base_qtl <- map(surv_base, ~quantile(., probs=c(0.05, .975)))
+surv_metastized <- map(times_plot, ~exp(-.*lambda_metastized))
+surv_metastized_qtl <- map(surv_metastized, ~quantile(., probs=c(0.05, .975)))
+
+ggplot(
+  data=bind_rows(
+  tibble(
+    t = times_plot,
+    metastized=FALSE,
+    surv=map_dbl(surv_base, median),
+    surv_low=map_dbl(surv_base_qtl, ~.[["5%"]]),
+    surv_up=map_dbl(surv_base_qtl, ~.[["97.5%"]])
+  ),
+  tibble(
+    t = times_plot,
+    metastized=TRUE,
+    surv=map_dbl(surv_metastized, median),
+    surv_low=map_dbl(surv_metastized_qtl, ~.[["5%"]]),
+    surv_up=map_dbl(surv_metastized_qtl, ~.[["97.5%"]])
+  )),aes(t))+
+  geom_ribbon(aes(ymin = surv_low, ymax = surv_up, fill=metastized), alpha=.3) +
+  geom_line(aes(y = surv, color=metastized))
+```
