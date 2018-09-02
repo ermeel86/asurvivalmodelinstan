@@ -125,7 +125,7 @@ Moreover, above we use *vectorized* statements, which makes the computation more
 ```{r  model_compile, message=FALSE}
 library(rstan)
 rstan_options(auto_write = TRUE)
-sm <- stan_model("./exponential_survival_simple.stan")
+sm <- stan_model("./exponential_survival_simple_ppc.stan")
 ```
 
 # Data preparation
@@ -164,7 +164,7 @@ Consider especially the `ess` and `rhat` columns below, which correspond to the 
 ```{r inspect_fit_mcmc, echo=FALSE}
 library(broom)
 knitr::kable(
- tidy(fit, conf.int = TRUE, estimate.method = "median",rhat=TRUE, ess=TRUE),
+ tidy(fit, pars=c("intercept", "betas[1]"), conf.int = TRUE, estimate.method = "median",rhat=TRUE, ess=TRUE),
  caption = 'Posterior summary'
 )
 ```
@@ -249,4 +249,37 @@ ggplot(
   )),aes(t))+
   geom_ribbon(aes(ymin = surv_low, ymax = surv_up, fill=metastized), alpha=.3) +
   geom_line(aes(y = surv, color=metastized))
+```
+
+# Posterior predictive checks
+
+Posterior predictive checks^[See the excellent bayesplot vignette [Graphical posterior predictive checks using the bayesplot package](https://cran.r-project.org/web/packages/bayesplot/vignettes/graphical-ppcs.html) for an introdution and practical instructions.] constitute a family of powerful methods to scrutinize relevant aspects of your model.
+
+Below we run various posteriod predictive checks constrained to the instances (individuals) that came with non-censored survival times:
+
+```{r ppc, message=FALSE}
+surv_times_rep <- as.matrix(post[,1,sprintf("times_censored_sampled[%d]", 1:stan_data$N_uncensored)]) 
+surv_times_train <- times[!msk_censored]
+###########################################################################################
+color_scheme_set("brightblue")
+ppc_dens_overlay(surv_times_train, surv_times_rep[1:500,])
+ppc_stat(surv_times_train, surv_times_rep, stat = "mean")
+ppc_stat(surv_times_train, surv_times_rep, stat = "sd")
+ppc_stat(surv_times_train, surv_times_rep, stat = "max")
+ppc_stat(surv_times_train, surv_times_rep, stat = "min")
+```
+
+As it turns out our model essentially suffers from overdispersion and a tendency for too large survival times. Potential ways to improve this, would be to consider accelerated failure time models, semiparametric base-line hazards or more general parametric survival models, like the Royston & Parmar^[[Flexible parametric proportional-hazards and proportional-odds models for censored survival data, with application to prognostic modelling and estimation of treatment effects.](https://www.ncbi.nlm.nih.gov/pubmed/12210632). A related case study will follow soon.] based family of models.
+
+## Generated Quantities Block
+
+The careful reader probably noticed that we did not specify how to obtain the parameter vector `times_censored_sampled` required for the posterior predictive checks. This can be achieved by appending the `generated quantities` block below to our Stan model:
+
+```{rstan generated_quantities}
+generated quantities {
+    vector[N_uncensored] times_censored_sampled;
+    for(i in 1:N_uncensored) {
+        times_censored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
+    }
+}
 ```
