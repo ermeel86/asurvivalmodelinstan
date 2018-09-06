@@ -1,7 +1,7 @@
 ---
-title: "A Survival Model in Stan"
+title: "A Survival Model in Stan_with comments by Tiago"
 author: "Eren Metin Elçi"
-date: 2018-09-06
+date: 2018-09-03
 output:
   tufte::tufte_html: default
   tufte::tufte_handout: default
@@ -10,10 +10,6 @@ output:
 The goal of this short case study is to demonstrate the essentials of a Bayesian workflow using the probabilistic programming language Stan. The dataset we consider here is known as the mastectomy dataset^[This case study is motivated by Austin Rochford's related PyMC3 [blog post](https://austinrochford.com/posts/2015-10-05-bayes-survival.html). See also [this](https://docs.pymc.io/notebooks/bayes_param_survival_pymc3.html) updated version, now part of the official PyMC3 documentation. The same dataset was also studied by the same author in [this](https://docs.pymc.io/notebooks/survival_analysis.html) related case study.]. As the title already suggest, we will implement the simplest, and probably most commonly used survival model, also sometimes known as (Cox's) proportional hazard model. 
 
 The beauty or advantage of the Bayesian framework is that we can avoid any technicality or approximation due to what is known as *ties* in the dataset, usually encountered in real datasets and which need special treatments/considerations in frequentist frameworks (see e.g. `coxph`). This is because we model the baseline hazard explicitly and hence do not need to revert to what is known as a pseudo-likelihood^[For a good and concise description of the frequentist approach and the utilized pseudo-likelihood, see chapter 9.4 and the related appendix in [Computer Age Statistical Inference](https://web.stanford.edu/~hastie/CASI/index.html) by Efron and Hastie.].
-
-Moreover, the Bayesian framework allows us to easily scrutinize our model(s) beyond what is apparently possible with standard frequentist approaches, hence allowing us to quickly identify aspects of the true/observed dataset that are not well described by our model(s). This allows us to systematically and iteratively probe the applicability and limits of our model(s).
-
-Before we dive into the matter, I would like to thank Tiago Cabaço for very valuable feedback on an early draft of this case study.
 
 Now, let's first have a look at the data:
 
@@ -32,49 +28,21 @@ knitr::kable(
 )
 ```
 
+
+
 More precisely, each row in the dataset represents observations from a woman diagnosed with breast cancer that underwent a mastectomy. 
   
   - The column `time` represents the time (in months) post-surgery that the woman was observed. 
   - The column `event` indicates whether or not the woman died during the observation period. 
   - The column `metastized` represents whether the cancer had metastized^[The cancers are classified as having metastized or not based on a histochemical marker.] prior to surgery.
 
-Next, let's look at some characteristics of the data to get a bigger picture of the problem.
+--- 
 
-## Proportion of censored patients
+**TC:** On this part I would add some descriptive stats on each variable you might find important to mention (e.g. number of patents, survival times for women with and without treatment, etc). This, for instance, might be helpful for the reader to understand how you have choosen the prior distribution for $\gamma$ and give a big picture of the problem you are trying to solve by using this type of models. 
 
-It is always a good to start to study the extent of censoring, below we do this for the two subpopulations corresponding to `metastized=FALSE` and `metastized=TRUE`, respectively.
+---
 
-```{r descrip0, echo=FALSE}
-library(ggplot2)
-ggplot(mutate(df,metastized=as.logical(metastized) ), aes(x=event, fill=metastized))+
-  geom_bar(stat='count', position='dodge')
-```
 
-## (Censored) Event times
-
-Let's inspect some of the "global" characteristics of the event time distribution, stratified w.r.t. censoring, i.e. `event`, and metastization, i.e. `metastized`.
-
-```{r time_grouped_stats, echo=FALSE}
-knitr::kable(
-  summarize(group_by(mutate(df, metastized=as.logical(metastized)), event, metastized), mean_time=mean(time), median_time=median(time), sd_time=sd(time))
-, 
-caption = 'Stratified quantitative characteristics of event times'
-)
-```
-
-### Histograms
-Below we show histograms for each, the event times as well as the censored survival times. The dotted vertical lines show the corresponding means.
-
-```{r descrip, echo=FALSE}
-ggplot(mutate(filter(df,event==TRUE),metastized=as.logical(metastized)), aes(x=time,color=metastized, fill=metastized)) + 
-  geom_histogram(alpha=0.5, position="identity", binwidth=5)+ggtitle("Event times")+
-  geom_vline(xintercept=mean(pull(filter(df,event==TRUE), "time")),linetype="dotted")
-
-ggplot(mutate(filter(df,event==FALSE),metastized=as.logical(metastized)), aes(x=time,color=metastized, fill=metastized)) + 
-  geom_histogram(alpha=0.5, position="identity", binwidth=5)+ggtitle("Censored survival times")+
-  geom_vline(xintercept=mean(pull(filter(df,event==FALSE), "time")),linetype="dotted")
-
-```
 # Some math (some notation)
 
 Central to survival models is the survival function $S(t)$ defined as 
@@ -83,10 +51,10 @@ $$ S(t) = \mathbb{P}[T>t] = e^{-H(t)} $$
 Here $T$ is a the survival time of an individual and thus $T>t$ denotes the event that the patient or individual survived beyond time $t$. $H(t)$ is known as the cumulative hazard and can be shown to be given by
 
 $$
-H(t) = \int_{0}^{t}{\rm d}u~h(u)
+H(t) = \int_{0}^{t}{\rm d}u~\lambda(u)
 $$
 
-Here we introduced^[We discard the dependence on latent parameters such as $\mathbf{\beta}$ or $\gamma$ below, for the sake of readability.] the hazard rate $h(t)$
+Here we introduced^[We discard the dependence on latent parameters such as $\mathbf{\beta}$ or $\gamma$ below, for the sake of readability.] the hazard rate $\lambda(t)$
 
 $$
 h(t;\mathbf{x}) = h_0(t) e^{\mathbf{x}'\cdot\boldsymbol{\beta}}
@@ -105,7 +73,11 @@ $$
 h(t)dt \doteq \mathbb{P}\left[T\in (t,t+dt) \vert T\geq t\right]
 $$
 
-To come back to our dataset above, we are going use the indicator `metastized` as the only covariate in $\mathbf{x}$ per individual, essentially giving us two baseline hazards for the two sub-populations. More precisely women without metastization prior to surgery are characterised by a (constant) baseline hazard equal to $\lambda_0=e^{\gamma}$ and women with metastization prior to surgery are characterised by a (constant) baseline hazard equal to $e^{\gamma + \beta}$, which, depending on the sign of $\beta$, might be larger or smaller than $\lambda_0$.
+---
+
+**TC:** At the end of this section I would try to shortly describe the model you are going to fit bellow by stating, for example, which predictors you are including in x'(maybe include mock notation for the cumulative hazard function like $h(t;\mathbf{methastised}) = h_0(t) e^{\mathbf{methastised}\cdot\boldsymbol{\beta}}$), and maybe finish by shortly describing what the model will tell you about the survival rate for each individual's survival time given what you include in the model. 
+
+---
 
 # Stan
 
@@ -116,9 +88,9 @@ Now let's get our hands dirty (or actually our keyboard) and start specifying ou
 Here we define precisely the type and dimensions of data provided externally^[E.g. via rstan, pystan or cmdstan.] to Stan.
 ```{rstan  data_block}
 data {
-    int<lower=1> N_uncensored;                                      
-    int<lower=1> N_censored;                                        
-    int<lower=0> NC;                                                
+    int<lower=0> N_uncensored;                                      
+    int<lower=0> N_censored;                                        
+    int<lower=1> NC;                                                
     matrix[N_censored,NC] X_censored;                               
     matrix[N_uncensored,NC] X_uncensored;                           
     vector<lower=0>[N_censored] times_censored;                          
@@ -126,11 +98,11 @@ data {
 }
 ```
 
-`N_uncensored` and `N_censored` are the number of women for which `event=1` and `event=0`, respectively. In survival model terminology, the former are uncensored instances, for which death (the event or endpoint of interest) was observed, and the latter are censored instances, for which no event was observed in the observation time `time`. The variable `N_C` is the number of covariates, in our case equal to $1$, since we only use `metastized`. Note that we allow for `N_C` to be $0$, which corresponds to the case where we fit one baseline hazard to the entire population.
+---
 
-For the sake of performance^[That is to be able to use vectorized statements, see below] we split the actual design matrix into two, corresponding to `event=1` and `event=0`. `X_uncensored` and `X_censored` in our particular case will be matrices with only one column, each. 
+**TC:** I would add comments on the Stan code simply describing what is containded in each data argument and maybe just add something on the text about what does censored and uncensroed means. Then I would just add a line saying this is going to important for computational reasons, which you will later clarify. 
 
-Lastly, `times_censored` and `times_uncensored` contain the values of `time` in the dataframe `df$, separated according to `event=0` and `event=1`, respectively.
+---
 
 ## Parameters block
 
@@ -162,28 +134,12 @@ model {
 }
 ```
 
-To get an intuition for the prior choice of `intercept` or actually $\gamma$, observe that $e^{-\gamma}$ is equal to the mean of baseline exponential (which in the data is around $100$, hence $\gamma\approx -4.6$).
+To get an intuition for the prior choice of `intercept` or actually $\gamma$, observe that $e^{-\gamma}$ is equal to the mean of baseline exponential (which in the data is around $100$, hence $\gamma\approx 4.6$).
 
 Note that implicit here is the assumption that survival times are mutually independent. 
 
 Moreover, above we use *vectorized* statements, which makes the computation more efficient than using, say, a for loop and iterating over all individuals. This is the main reason why we decided to work with the `_censored` and `_uncensored` suffixes and split the data, as opposed to the variant where one keeps the data together and provides an boolean array/vector specifying which patients have a (right-) censored survival time.
 
-## Generated Quantities Block
-
-For the posterior predictive checks we will conduct below, that allow us to scrutinize aspects of our posterior induced family^[Here we adopt the viewpoint that Bayesian statistics leads to families of models, each model weighted approximately proportional to the corresponding posterior probability of it.] of survival models, we need to be able sample survival times, for each individual (or a suitable subset of them), at a set of representative posterior induced model instances. These survival times are stored below in the vector `times_censored_sampled`. Note that we only generate survival times for individuals for which we actually observed an event.
-
-
-```{rstan generated_quantities}
-generated quantities {
-    vector[N_uncensored] times_censored_sampled;
-    for(i in 1:N_uncensored) {
-        times_censored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
-    }
-}
-```
-
-
-A great improvement in Stan $2.18$ is the support of vectorized `_rng` statements, i.e. the possibility to draw vectors of random samples, instead of generating them on scalar based within a for-loop.
 ## Model compilation
 
 ```{r  model_compile, message=FALSE}
@@ -222,8 +178,18 @@ fit <- sampling(sm, data=stan_data, seed=42, chains=4, cores=2, iter=4000)
 
 # Inspecting results
 
-Consider especially the `ess` and `rhat` columns below, which correspond to the effective sample size and the potential scale reduction statistics. In a nutshell, `rhat` should be very close to $1$ which indicates that the chain(s) mixed (converged) and `ess` should be as close as possible to the total number of MCMC iterations, excluding warmup^[Starting in Stan 2.18 `ess` can in fact be larger than the number of MCMC iterations, essentially due to what is known as anti-correlations (yes NUTS and HMC can sometimes be unbelievable super-efficient!). For more details on the two quantities see the section [General MCMC diagnostics](http://mc-stan.org/bayesplot/articles/visual-mcmc-diagnostics.html#general-mcmc-diagnostics) in the bayesplot vignette [Visual MCMC diagnostics using the bayesplot package
+Consider especially the `ess` and `rhat` columns below, which correspond to the effective sample size and the potential scale reduction statistics. In a nutshell, `rhat` should be very close to $1$ which indicates that the chain(s) mixed (converges) and `ess` should be as close as possible to the total number of MCMC iterations^[Starting in Stan 2.18 `ess` can in fact be larger than the number of MCMC iterations, essentially due to what is known as anti-correlations (yes NUTS and HMC can sometimes be unbelievable super-efficient!). For more details on the two quantities see the section [General MCMC diagnostics](http://mc-stan.org/bayesplot/articles/visual-mcmc-diagnostics.html#general-mcmc-diagnostics) in the bayesplot vignette [Visual MCMC diagnostics using the bayesplot package
 ](http://mc-stan.org/bayesplot/articles/visual-mcmc-diagnostics.html). For a detailed example regarding the updates on `ess` and `rhat` in 2.18 I can highly recommend Aki Vehtari's [Rank-normalized split-Rhat and relative efficiency estimates](https://avehtari.github.io/rhat_neff/rhat_neff.html)] (excluding burn-in).
+
+---
+
+**TC:**
+
+- line 180: "chain(s) mixed (converged)"?
+
+- line 181: "excluding warmup"? 
+
+---
 
 ```{r inspect_fit_mcmc, echo=FALSE}
 library(broom)
@@ -244,10 +210,17 @@ check_treedepth(fit)
 library(bayesplot)
 library(survival)
 post <- as.array(fit)
-fit_cox <- coxph(Surv(time, event)~metastized, data=df)
+fit_cox <- coxph( Surv(time, event)~metastized, data=df)
 coef_cox <- coef(fit_cox)
 se_cox <- sqrt(fit_cox$var)
 ```
+---
+
+**TC:** OCD comment ;p 
+
+- line 209: extra space after `coxph(`.
+
+---
 
 ### Kernel density plots of posterior draws with chains separated but overlaid on a single plot.
 
@@ -257,11 +230,30 @@ mcmc_dens_overlay(post, pars=c("betas[1]", "intercept"))
 
 ### Plots of uncertainty intervals computed from posterior draws with all chains merged.
 
-The three dashed vertical lines below (from left to right) correspond to the frequentist's^[Using the `coxph` routine in the survival package, see the code of this RMarkdown.] point estimate minus the standard error, the point estimate and the point estimate plus the standard error of the regression coefficient, respectively. 
+The three vertical lines below (from left to right) correspond to the frequentist's^[Using the `coxph` routine in the survival package, see the code of this RMarkdown.] point estimate minus the standard error, the point estimate and the point estimate plus the standard error of the regression coefficient, respectively. 
+
+---
+
+**TC:** Two comments of this plot: 
+
+- I would make just state what the dot and uncertainty interval you are using for the posterior;
+
+- You say you include 3 vertical lines on the plot, but the plot displays 4 (one at 0 as well). I would either say the "(...) three black vertical lines (...)" or change their appearance so they can't be cofused with the line at 0:
+
+#### TC suggestion:
+
+```{r visual_inspect_2.TC, message=FALSE}
+mcmc_intervals(post, pars=c("betas[1]", "intercept")) + 
+  vline_at(c(coef_cox-se_cox, coef_cox, coef_cox+se_cox),
+           linetype="dashed") # TC
+```
+
+---
+
 
 ```{r visual_inspect_2, message=FALSE}
 mcmc_intervals(post, pars=c("betas[1]", "intercept")) + 
-  vline_at(c(coef_cox-se_cox, coef_cox, coef_cox+se_cox),linetype="dashed")
+  vline_at(c(coef_cox-se_cox, coef_cox, coef_cox+se_cox))
 ```
 
 ### Pairs plot
@@ -284,11 +276,8 @@ mcmc_trace(post, pars=c("betas[1]", "intercept"),
            )
 ```
 
-# Survival curves
-
-Below we show the survival curves that we estimated based on our model together with a $95\%$ credible intervals.
-
-```{r kaplan_meier, echo=FALSE, message=FALSE,error=FALSE}
+# Kaplan Meier plot
+```{r kaplan_meier, echo=FALSE}
 library(purrr)
 lambda_base = as.vector(exp(post[,,"intercept"]))
 lambda_metastized = lambda_base * as.vector(exp(post[,,"betas[1]"]))
@@ -297,8 +286,6 @@ surv_base <- map(times_plot, ~exp(-.*lambda_base))
 surv_base_qtl <- map(surv_base, ~quantile(., probs=c(0.05, .975)))
 surv_metastized <- map(times_plot, ~exp(-.*lambda_metastized))
 surv_metastized_qtl <- map(surv_metastized, ~quantile(., probs=c(0.05, .975)))
-
-
 
 ggplot(
   data=bind_rows(
@@ -320,13 +307,11 @@ ggplot(
   geom_line(aes(y = surv, color=metastized))
 ```
 
-For reference below is the classical Kaplan-Meier estimate^[Created with the R package `survminer`. For a concise derivation of the estimator  see chapter 9.2 in Efron \& Hastie Computer Age Statistical Inference (link above).]
-```{r kaplan_meier_classical, echo=FALSE, message=FALSE, error=FALSE}
-library(survminer)
-fit_ <- survfit(Surv(time, event)~metastized, data=mutate(df, metastized=as.logical(metastized)))
-dat_surv <- ggsurvplot(fit_, data = df,conf.int = TRUE)
-dat_surv
-```
+---
+
+**TC:** Maybe add a small description about this plot? I guess some Stan users might not be familiar with it
+
+---
 
 # Posterior predictive checks
 
@@ -347,3 +332,29 @@ ppc_stat(surv_times_train, surv_times_rep, stat = "min")
 ```
 
 As it turns out our model essentially suffers from overdispersion and a tendency for too large survival times. Potential ways to improve this, would be to consider accelerated failure time models, semiparametric base-line hazards or more general parametric survival models, like the Royston & Parmar^[[Flexible parametric proportional-hazards and proportional-odds models for censored survival data, with application to prognostic modelling and estimation of treatment effects.](https://www.ncbi.nlm.nih.gov/pubmed/12210632). A related case study will follow soon.] based family of models.
+
+---
+
+**TC:** Maybe you could add a small conclusion about what does the model allow you to say regarding the survival time of an individual given the covariates you include in the model. And then follow with the overdispersion issues you just mention and suggestions for improvement. 
+
+---
+
+
+## Generated Quantities Block
+
+---
+
+**TC:** I would move this part to the section where you explain the other model blocks above. 
+
+---
+
+The careful reader probably noticed that we did not specify how to obtain the parameter vector `times_censored_sampled` required for the posterior predictive checks. This can be achieved by appending the `generated quantities` block below to our Stan model:
+
+```{rstan generated_quantities}
+generated quantities {
+    vector[N_uncensored] times_censored_sampled;
+    for(i in 1:N_uncensored) {
+        times_censored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
+    }
+}
+```
