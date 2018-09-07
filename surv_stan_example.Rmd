@@ -13,7 +13,7 @@ The beauty or advantage of the Bayesian framework is that we can avoid any techn
 
 Moreover, the Bayesian framework allows us to easily scrutinize our model(s) beyond what is apparently possible with standard frequentist approaches, hence allowing us to quickly identify aspects of the true/observed dataset that are not well described by our model(s). This allows us to systematically and iteratively probe the applicability and limits of our model(s).
 
-Before we dive into the matter, I would like to thank Tiago Cabaço for very valuable feedback on an early draft of this case study.
+Before we dive into the matter, I would like to thank Tiago Cabaço for very valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
 
 Now, let's first have a look at the data:
 
@@ -75,8 +75,8 @@ ggplot(mutate(filter(df,event==FALSE),metastized=as.logical(metastized)), aes(x=
   geom_vline(xintercept=mean(pull(filter(df,event==FALSE), "time")),linetype="dotted")
 
 ```
-# Some math (some notation)
 
+# Some math (some notation)
 Central to survival models is the survival function $S(t)$ defined as 
 
 $$ S(t) = \mathbb{P}[T>t] = e^{-H(t)} $$
@@ -130,7 +130,7 @@ data {
 
 For the sake of performance^[That is to be able to use vectorized statements, see below] we split the actual design matrix into two, corresponding to `event=1` and `event=0`. `X_uncensored` and `X_censored` in our particular case will be matrices with only one column, each. 
 
-Lastly, `times_censored` and `times_uncensored` contain the values of `time` in the dataframe `df$, separated according to `event=0` and `event=1`, respectively.
+Lastly, `times_censored` and `times_uncensored` contain the values of `time` in the dataframe `df`, separated according to `event=0` and `event=1`, respectively.
 
 ## Parameters block
 
@@ -170,20 +170,21 @@ Moreover, above we use *vectorized* statements, which makes the computation more
 
 ## Generated Quantities Block
 
-For the posterior predictive checks we will conduct below, that allow us to scrutinize aspects of our posterior induced family^[Here we adopt the viewpoint that Bayesian statistics leads to families of models, each model weighted approximately proportional to the corresponding posterior probability of it.] of survival models, we need to be able sample survival times, for each individual (or a suitable subset of them), at a set of representative posterior induced model instances. These survival times are stored below in the vector `times_censored_sampled`. Note that we only generate survival times for individuals for which we actually observed an event.
+For the posterior predictive checks we will conduct below, that allow us to scrutinize aspects of our posterior induced family^[Here we adopt the viewpoint that Bayesian statistics leads to families of models, each model weighted approximately proportional to the corresponding posterior probability of it.] of survival models, we need to be able to sample survival times, for each individual (or a suitable subset of them), at a set of representative posterior induced model instances. These survival times are stored below in the vector `times_uncensored_sampled`. Note that we only generate survival times for individuals for which we actually observed an event.
 
 
 ```{rstan generated_quantities}
 generated quantities {
-    vector[N_uncensored] times_censored_sampled;
+    vector[N_uncensored] times_uncensored_sampled;
     for(i in 1:N_uncensored) {
-        times_censored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
+        times_uncensored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
     }
 }
 ```
 
 
 A great improvement in Stan $2.18$ is the support of vectorized `_rng` statements, i.e. the possibility to draw vectors of random samples, instead of generating them on scalar based within a for-loop.
+
 ## Model compilation
 
 ```{r  model_compile, message=FALSE}
@@ -335,7 +336,7 @@ Posterior predictive checks^[See the excellent bayesplot vignette [Graphical pos
 Below we run various posteriod predictive checks constrained to the instances (individuals) that came with non-censored survival times:
 
 ```{r ppc, message=FALSE}
-surv_times_rep <- as.matrix(post[,1,sprintf("times_censored_sampled[%d]", 1:stan_data$N_uncensored)]) 
+surv_times_rep <- as.matrix(post[,1,sprintf("times_uncensored_sampled[%d]", 1:stan_data$N_uncensored)]) 
 surv_times_train <- times[!msk_censored]
 ###########################################################################################
 color_scheme_set("brightblue")

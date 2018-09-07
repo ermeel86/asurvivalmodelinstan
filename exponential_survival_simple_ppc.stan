@@ -22,9 +22,9 @@ model {
 }
 /**************************************************************************************/
 generated quantities {
-    vector[N_uncensored] times_censored_sampled;
+    vector[N_uncensored] times_uncensored_sampled;
     for(i in 1:N_uncensored) {
-        times_censored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
+        times_uncensored_sampled[i] = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
     }
 }
 /**************************************************************************************/
