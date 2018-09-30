@@ -1,7 +1,7 @@
 ---
 title: "A Survival Model in Stan"
 author: "Eren Metin Elçi"
-date: 2018-09-06
+date: 2018-09-30
 output:
   tufte::tufte_html: default
   tufte::tufte_handout: default
@@ -190,7 +190,7 @@ A great improvement in Stan $2.18$ is the support of vectorized `_rng` statement
 ```{r  model_compile, message=FALSE}
 library(rstan)
 rstan_options(auto_write = TRUE)
-sm <- stan_model("./exponential_survival_simple_ppc.stan")
+sm <- stan_model("~/Desktop/Stan/A_Survival_Model_in_Stan/exponential_survival_simple_ppc.stan")
 ```
 
 # Data preparation
@@ -347,4 +347,49 @@ ppc_stat(surv_times_train, surv_times_rep, stat = "max")
 ppc_stat(surv_times_train, surv_times_rep, stat = "min")
 ```
 
-As it turns out our model essentially suffers from overdispersion and a tendency for too large survival times. Potential ways to improve this, would be to consider accelerated failure time models, semiparametric base-line hazards or more general parametric survival models, like the Royston & Parmar^[[Flexible parametric proportional-hazards and proportional-odds models for censored survival data, with application to prognostic modelling and estimation of treatment effects.](https://www.ncbi.nlm.nih.gov/pubmed/12210632). A related case study will follow soon.] based family of models.
+Our posterior predictive cechsk now suggest that our model suffers from overdispersion and a tendency for too large survival times. Now would be the time to think about improvents of our model, e.g. one couldconsider accelerated failure time models, semiparametric base-line hazards or more general parametric survival models, like the Royston & Parmar^[[Flexible parametric proportional-hazards and proportional-odds models for censored survival data, with application to prognostic modelling and estimation of treatment effects.](https://www.ncbi.nlm.nih.gov/pubmed/12210632)^[A related case study will follow soon.] based family of models.].
+
+However as it turns out we did overlook something crutial here:
+
+>The samples we have observed for uncensored survival times are in fact all conditioned to be less equal the length of the study
+
+It is crutial to understand this fact: Even if the samples are uncensored, since our experiment only ran for a (hopefully pre-defined) length, we only observe survival (and censored) times that are less equal the length of the study. On the other hand our generative model does create samples on the unconstrained domain of our posterior distribution. We therefore need to adjust the `generative quantities` block to generate survival times conditioned to be less equal the length of the study (in this case 255 months, see above):
+
+```{rstan  generated_quantities_block2}
+generated quantities {
+    vector[N_uncensored] times_uncensored_sampled;
+    {
+        real tmp;
+        real max_time;
+        real max_time_censored;
+        max_time = max(times_uncensored);
+        max_time_censored = max(times_censored);
+        if(max_time_censored > max_time) max_time = max_time_censored;
+        
+        for(i in 1:N_uncensored) {
+            tmp= max_time + 1; 
+            while(tmp > max_time) {
+                tmp = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
+            }
+            times_uncensored_sampled[i] = tmp;
+        }
+    }
+
+}
+```
+
+Note that we added additional brackets to cast the variables `tmp, max_time, max_time_censored` into local variables so they are excluded from to the posterior output^[In technical terms, we created a local scope using the additional `{}`.]. We now have to "compile" the adjusted model, fit it and scrutinize it as above:
+
+```{r do_again,message=FALSE}
+sm2 <- stan_model("~/Desktop/Stan/A_Survival_Model_in_Stan/exponential_survival_simple_ppc_cond.stan")
+fit2 <- sampling(sm2, data=stan_data, seed=42, chains=4, cores=2, iter=4000)
+post2 <- as.array(fit2)
+surv_times_rep2 <- as.matrix(post2[,1,sprintf("times_uncensored_sampled[%d]", 1:stan_data$N_uncensored)]) 
+###########################################################################################
+color_scheme_set("orange")
+ppc_dens_overlay(surv_times_train, surv_times_rep2[1:500,])
+ppc_stat(surv_times_train, surv_times_rep2, stat = "mean")
+ppc_stat(surv_times_train, surv_times_rep2, stat = "sd")
+ppc_stat(surv_times_train, surv_times_rep2, stat = "max")
+ppc_stat(surv_times_train, surv_times_rep2, stat = "min")
+```
