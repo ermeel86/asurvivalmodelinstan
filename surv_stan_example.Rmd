@@ -1,7 +1,7 @@
 ---
 title: "A Survival Model in Stan"
 author: "Eren Metin Elçi"
-date: 2018-09-30
+date: 2018-10-25
 output:
   tufte::tufte_html: default
   tufte::tufte_handout: default
@@ -219,6 +219,7 @@ stan_data <- list(N_uncensored=N-N_censored,
 ```
 
 # Fitting the model
+
 ```{r stan_fit, message=FALSE}
 fit <- sampling(sm, data=stan_data, seed=42, chains=4, cores=2, iter=4000)
 ```
