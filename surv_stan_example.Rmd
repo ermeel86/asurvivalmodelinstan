@@ -7,7 +7,7 @@ output:
   tufte::tufte_handout: default
 ---
 
-The goal of this short case study is two-fold. Firstly, I wish to demonstrate essentials of a Bayesian workflow using the probabilistic programming language Stan. Secondly the analysis shows that doing posterior (and prior) predictive checks for (right) censored (survival) data requires an adjustement of the standard method utilized for drawing samples from the posterior preditive distribution.
+The goal of this short case study is two-fold. Firstly, I wish to demonstrate essentials of a Bayesian workflow using the probabilistic programming language Stan. Secondly the analysis shows that doing posterior (and prior) predictive checks for (right) censored (survival) data requires an adjustment of the standard method utilized for drawing samples from the posterior preditive distribution.
 
 The dataset we consider here is known as the mastectomy dataset^[This case study is motivated by Austin Rochford's related PyMC3 [blog post](https://austinrochford.com/posts/2015-10-05-bayes-survival.html). See also [this](https://docs.pymc.io/notebooks/bayes_param_survival_pymc3.html) updated version, now part of the official PyMC3 documentation. The same dataset was also studied by the same author in [this](https://docs.pymc.io/notebooks/survival_analysis.html) related case study.]. As the title already suggest, we will implement the simplest, and probably most commonly used survival model, also sometimes known as (Cox's) proportional hazard model. 
 
@@ -333,9 +333,9 @@ dat_surv
 
 # Posterior predictive checks
 
-Posterior predictive checks^[See the excellent bayesplot vignette [Graphical posterior predictive checks using the bayesplot package](https://cran.r-project.org/web/packages/bayesplot/vignettes/graphical-ppcs.html) for an introdution and practical instructions.] constitute a family of powerful methods to scrutinize relevant aspects of your model.
+Posterior predictive checks^[See the excellent bayesplot vignette [Graphical posterior predictive checks using the bayesplot package](https://cran.r-project.org/web/packages/bayesplot/vignettes/graphical-ppcs.html) for an introduction and practical instructions.] constitute a family of powerful methods to scrutinize relevant aspects of your model.
 
-Below we run various posteriod predictive checks constrained to the instances (individuals) that came with non-censored survival times:
+Below we run various posterior predictive checks constrained to the instances (individuals) that came with non-censored survival times:
 
 ```{r ppc, message=FALSE}
 surv_times_rep <- as.matrix(map_dfr(1:dim(post)[2], ~as.tibble(post[,.,sprintf("times_uncensored_sampled[%d]", 1:stan_data$N_uncensored)])))
@@ -349,13 +349,13 @@ ppc_stat(surv_times_train, surv_times_rep, binwidth = 1, stat = "max")
 ppc_stat(surv_times_train, surv_times_rep, binwidth = 1, stat = "min")
 ```
 
-Our posterior predictive checks from above suggest that our model suffers from overdispersion and a tendency for too large survival times. Now would be the time to think about improving the current model, e.g. one could consider accelerated failure time models, semiparametric base-line hazards or more general parametric survival models, like the Royston & Parmar^[[Flexible parametric proportional-hazards and proportional-odds models for censored survival data, with application to prognostic modelling and estimation of treatment effects.](https://www.ncbi.nlm.nih.gov/pubmed/12210632)]-based family of models.
+Our posterior predictive checks from above suggest that our model suffers from overdispersion and a tendency for too large survival times. Now would be the time to think about improving the current model, e.g. one could consider accelerated failure time models, semi-parametric base-line hazards or more general parametric survival models, like the Royston & Parmar^[[Flexible parametric proportional-hazards and proportional-odds models for censored survival data, with application to prognostic modelling and estimation of treatment effects.](https://www.ncbi.nlm.nih.gov/pubmed/12210632)]-based family of models.
 
-However as it turns out we did overlook something crutial here:
+However as it turns out we did overlook something crucial here:
 
 >The samples we have observed for uncensored survival times are in fact all conditioned to be less equal the length of the study
 
-It is crutial to understand this fact: Even if the samples are uncensored, since our experiment only ran for a (hopefully pre-defined) length, we only observe survival (and censored) times that are less equal the length of the study. On the other hand our generative model does create samples on the unconstrained domain of our posterior predictive distribution. We therefore need to adjust the `generative quantities` block to generate survival times conditioned to be less equal the length of the study (in this case 255 months, see above). We do this here by simple rejection sampling:
+It is crucial to understand this fact: Even if the samples are uncensored, since our experiment only ran for a (hopefully pre-defined) length, we only observe survival (and censored) times that are less equal the length of the study. On the other hand our generative model does create samples on the unconstrained domain of our posterior predictive distribution. We therefore need to adjust the `generative quantities` block to generate survival times conditioned to be less equal the length of the study (in this case 255 months, see above). We do this here by simple rejection sampling:
 
 ```{rstan  generated_quantities_block2}
 generated quantities {
@@ -380,7 +380,7 @@ generated quantities {
 }
 ```
 
-Note that we added additional brackets `{}` above, to change the variables `tmp, max_time, max_time_censored` to local variables so they are excluded from to the posterior output^[In technical terms, we created a local scope using the additional `{}`.]. We now compile the adjusted model, fit it and scrutinize the posterior predictive properies as above:
+Note that we added additional brackets `{}` above, to change the variables `tmp, max_time, max_time_censored` to local variables so they are excluded from to the posterior output^[In technical terms, we created a local scope using the additional `{}`.]. We now compile the adjusted model, fit it and scrutinize the posterior predictive properties as above:
 
 ```{r do_again,message=FALSE}
 sm2 <- stan_model("~/Desktop/Stan/A_Survival_Model_in_Stan/exponential_survival_simple_ppc_cond.stan")
