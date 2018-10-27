@@ -2,12 +2,12 @@
 data {
     int<lower=0> N_uncensored;                                      
     int<lower=0> N_censored;                                        
-    int<lower=0> N_times_eval_pec;
     int<lower=1> NC;                                                
+    int<lower=0> N_times_eval_pec;
     matrix[N_censored,NC] X_censored;                               
     matrix[N_uncensored,NC] X_uncensored;                           
     vector<lower=0>[N_censored] times_censored;                          
-    vector<lower=0>[N_uncensored] times_uncensored;
+    vector<lower=0>[N_uncensored] times_uncensored;                       
     vector<lower=0>[N_times_eval_pec] times_eval_pec;
 }
 /**************************************************************************************/
@@ -17,14 +17,16 @@ transformed data {
 /**************************************************************************************/
 parameters {
     vector[NC] betas;                                     
-    real intercept;                                 
+    real intercept;
+    real<lower=0> alpha;
 }
 /**************************************************************************************/
 model {
+    alpha ~ normal(1, .2);
     betas ~ normal(0,2);                                                            
     intercept   ~ normal(-5,2);                                                     
-    target += exponential_lpdf(times_uncensored | exp(intercept+X_uncensored*betas)); 
-    target += exponential_lccdf(times_censored  | exp(intercept+X_censored*betas));  
+    target += gamma_lpdf(times_uncensored | alpha, exp(intercept+X_uncensored*betas)); 
+    target += gamma_lccdf(times_censored | alpha, exp(intercept+X_censored*betas));  
 }
 /**************************************************************************************/
 generated quantities {
@@ -41,7 +43,7 @@ generated quantities {
         for(i in 1:N_uncensored) {
             tmp= max_time + 1; 
             while(tmp > max_time) {
-                tmp = exponential_rng(exp(intercept+X_uncensored[i,]*betas));
+                tmp = gamma_rng(alpha, exp(intercept+X_uncensored[i,]*betas));
             }
             times_uncensored_sampled[i] = tmp;
         }
@@ -49,12 +51,12 @@ generated quantities {
 
     for(i in 1:N_uncensored) {
         for(j in 1:N_times_eval_pec) {
-            survs[i,j] = 1- exponential_cdf(times_eval_pec[j],exp(intercept+X_uncensored[i,]*betas));
+            survs[i,j] = 1- gamma_cdf(times_eval_pec[j],alpha, exp(intercept+X_uncensored[i,]*betas));
         }
     }
     for(i in 1:N_censored) {
         for(j in 1:N_times_eval_pec) {
-            survs[i+N_uncensored,j] = 1-exponential_cdf(times_eval_pec[j],exp(intercept+X_censored[i,]*betas));
+            survs[i+N_uncensored,j] = 1-gamma_cdf(times_eval_pec[j],alpha, exp(intercept+X_censored[i,]*betas));
         }
     }
 }
