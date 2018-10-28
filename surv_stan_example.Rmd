@@ -15,7 +15,7 @@ The beauty or advantage of the Bayesian framework is that we can avoid any techn
 
 Moreover, the Bayesian framework allows us to easily scrutinize our model(s) beyond what is apparently possible with standard frequentist approaches, hence allowing us to quickly identify aspects of the true/observed dataset that are not well described by our model(s). This allows us to systematically and iteratively probe the applicability and limits of our model(s).
 
-Before we dive into the matter, I would like to thank Tiago Caba??o for very valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
+Before we dive into the matter, I would like to thank Tiago Caba??o and Jacob de Zoete for very valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
 
 Now, let's first have a look at the data:
 
@@ -268,17 +268,33 @@ mcmc_intervals(post, pars=c("betas[1]", "intercept")) +
   vline_at(c(coef_cox-1.96*se_cox, coef_cox, coef_cox+1.96*se_cox),linetype="dashed")
 ```
 
-### Baseline hazard
+### Hazard
 
-Let us also separately compare the posterior for the baseline hazard with what one would obtain
+Let us also separately compare the 95% credible interval for the baseline (that is `metastized==0`) hazard with what one would obtain
 from an exact maximum likelihood calculation:
 
 ```{r visual_inspect_baseline, message=FALSE}
-baseline_hazard_mle <- (N-N_censored)/sum(times)
-baseline_hazard_mle_sd <-  sqrt(N-N_censored)/sum(times)
-mcmc_intervals(post, pars=c("intercept"), transformations = exp) + 
+df_0 <- filter(df, metastized==0)
+df_1 <- filter(df_0, event==TRUE)
+baseline_hazard_mle <- nrow(df_1)/sum(pull(df_0, "time"))
+baseline_hazard_mle_sd <-  sqrt(nrow(df_1))/sum(pull(df_0, "time"))
+df_fit <- as.tibble(as.data.frame(fit)) %>% mutate(hazard0=exp(intercept)) 
+mcmc_intervals(df_fit, pars=c("hazard0")) + 
   vline_at(c(baseline_hazard_mle-1.96*baseline_hazard_mle_sd, baseline_hazard_mle,baseline_hazard_mle+1.96*baseline_hazard_mle_sd),linetype="dashed")+
-  xlim(0, 0.01)
+  xlim(0, .015)
+```
+
+and also for the `metastized==1` cases:
+
+```{r visual_inspect_hazard, message=FALSE}
+df_0 <- filter(df, metastized==1)
+df_1 <- filter(df_0, event==TRUE)
+baseline_hazard_mle <- nrow(df_1)/sum(pull(df_0, "time"))
+baseline_hazard_mle_sd <-  sqrt(nrow(df_1))/sum(pull(df_0, "time"))
+df_fit <- df_fit %>% mutate(hazard1=exp(intercept+`betas[1]`))
+mcmc_intervals(df_fit, pars=c("hazard1")) + 
+  vline_at(c(baseline_hazard_mle-1.96*baseline_hazard_mle_sd, baseline_hazard_mle,baseline_hazard_mle+1.96*baseline_hazard_mle_sd),linetype="dashed")+
+  xlim(0, .015)
 ```
 
 ### Pairs plot
