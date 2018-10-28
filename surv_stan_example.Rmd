@@ -1,7 +1,7 @@
 ---
 title: "A Survival Model in Stan"
-author: "Eren Metin Elçi"
-date: 2018-10-25
+author: "Eren Metin Elci"
+date: 2018-10-28
 output:
   tufte::tufte_html: default
   tufte::tufte_handout: default
@@ -11,11 +11,11 @@ The goal of this short case study is two-fold. Firstly, I wish to demonstrate es
 
 The dataset we consider here is known as the mastectomy dataset^[This case study is motivated by Austin Rochford's related PyMC3 [blog post](https://austinrochford.com/posts/2015-10-05-bayes-survival.html). See also [this](https://docs.pymc.io/notebooks/bayes_param_survival_pymc3.html) updated version, now part of the official PyMC3 documentation. The same dataset was also studied by the same author in [this](https://docs.pymc.io/notebooks/survival_analysis.html) related case study.]. As the title already suggest, we will implement the simplest, and probably most commonly used survival model, also sometimes known as (Cox's) proportional hazard model. 
 
-The beauty or advantage of the Bayesian framework is that we can avoid any technicality or approximation due to what is known as *ties* in the dataset, usually encountered in real datasets and which need special treatments/considerations in frequentist frameworks (see e.g. `coxph`). This is because we model the baseline hazard explicitly and hence do not need to revert to what is known as a pseudo-likelihood^[For a good and concise description of the frequentist approach and the utilized pseudo-likelihood, see chapter 9.4 and the related appendix in [Computer Age Statistical Inference](https://web.stanford.edu/~hastie/CASI/index.html) by Efron and Hastie.].
+The beauty or advantage of the Bayesian framework is that we can avoid any technicality or approximation due to what is known as *ties* in the dataset, usually encountered in real datasets and which need special treatments/considerations in the frequentist Cox Proportional Hazard framework (see e.g. `coxph`). This is because we model the baseline hazard explicitly and hence do not need to revert to what is known as a pseudo-likelihood^[For a good and concise description of the frequentist approach and the utilized pseudo-likelihood, see chapter 9.4 and the related appendix in [Computer Age Statistical Inference](https://web.stanford.edu/~hastie/CASI/index.html) by Efron and Hastie.].
 
 Moreover, the Bayesian framework allows us to easily scrutinize our model(s) beyond what is apparently possible with standard frequentist approaches, hence allowing us to quickly identify aspects of the true/observed dataset that are not well described by our model(s). This allows us to systematically and iteratively probe the applicability and limits of our model(s).
 
-Before we dive into the matter, I would like to thank Tiago Cabaço for very valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
+Before we dive into the matter, I would like to thank Tiago Caba??o for very valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
 
 Now, let's first have a look at the data:
 
@@ -265,22 +265,38 @@ The three dashed vertical lines below (from left to right) correspond to the fre
 
 ```{r visual_inspect_2, message=FALSE}
 mcmc_intervals(post, pars=c("betas[1]", "intercept")) + 
-  vline_at(c(coef_cox-se_cox, coef_cox, coef_cox+se_cox),linetype="dashed")
+  vline_at(c(coef_cox-1.96*se_cox, coef_cox, coef_cox+1.96*se_cox),linetype="dashed")
+```
+
+### Baseline hazard
+
+Let us also separately compare the posterior for the baseline hazard with what one would obtain
+from an exact maximum likelihood calculation:
+
+```{r visual_inspect_baseline, message=FALSE}
+baseline_hazard_mle <- (N-N_censored)/sum(times)
+baseline_hazard_mle_sd <-  sqrt(N-N_censored)/sum(times)
+mcmc_intervals(post, pars=c("intercept"), transformations = exp) + 
+  vline_at(c(baseline_hazard_mle-1.96*baseline_hazard_mle_sd, baseline_hazard_mle,baseline_hazard_mle+1.96*baseline_hazard_mle_sd),linetype="dashed")+
+  xlim(0, 0.01)
 ```
 
 ### Pairs plot
+
 ```{r visual_inspect_3, message=FALSE}
 color_scheme_set("red")
 mcmc_pairs(post, pars=c("betas[1]", "intercept"))
 ```
 
 ### Hex plot
+
 ```{r visual_inspect_4, message=FALSE}
 color_scheme_set("gray")
 mcmc_hex(post, pars=c("betas[1]", "intercept"))
 ```
 
 ### Trace plot
+
 ```{r visual_inspect_5, message=FALSE}
 color_scheme_set("mix-blue-red")
 mcmc_trace(post, pars=c("betas[1]", "intercept"),
