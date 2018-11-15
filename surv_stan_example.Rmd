@@ -1,7 +1,7 @@
 ---
 title: "A Survival Model in Stan"
-author: "Eren Metin Elci"
-date: 2018-10-28
+author: "Eren M. El&ccedil;i"
+date: 2018-11-15
 output:
   tufte::tufte_html: default
   tufte::tufte_handout: default
@@ -15,7 +15,7 @@ The beauty or advantage of the Bayesian framework is that we can avoid any techn
 
 Moreover, the Bayesian framework allows us to easily scrutinize our model(s) beyond what is apparently possible with standard frequentist approaches, hence allowing us to quickly identify aspects of the true/observed dataset that are not well described by our model(s). This allows us to systematically and iteratively probe the applicability and limits of our model(s).
 
-Before we dive into the matter, I would like to thank Tiago Caba??o and Jacob de Zoete for very valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
+Before we dive into the matter, I would like to thank Tiago Caba&ccedil;o and Jacob de Zoete for valuable feedback on an early draft of this case study. I also would like to thank Aki Vehtari, Arya Pourzanjani and Jacki Novik for fruitful discussions on survival models, which will find applications beyond this case study... Stay tuned.
 
 Now, let's first have a look at the data:
 
@@ -116,7 +116,7 @@ Now let's get our hands dirty (or actually our keyboard) and start specifying ou
 ## Data block
 
 Here we define precisely the type and dimensions of data provided externally^[E.g. via rstan, pystan or cmdstan.] to Stan.
-```{rstan  data_block}
+```{stan output.var='dump', eval = FALSE, tidy = FALSE}
 data {
     int<lower=1> N_uncensored;                                      
     int<lower=1> N_censored;                                        
@@ -138,7 +138,7 @@ Lastly, `times_censored` and `times_uncensored` contain the values of `time` in 
 
 Here we define all parameters that we wish to infer.
 
-```{rstan  parameters_block}
+```{stan output.var='dump', eval = FALSE, tidy = FALSE}
 parameters {
     vector[NC] betas;                                     
     real intercept;                                 
@@ -155,7 +155,7 @@ Here we define the likelihood and priors. Before we do so, I'd like to quote [Jo
 
 In this sense, let's hack the model block:
 
-```{rstan model_block}
+```{stan output.var='dump', eval = FALSE, tidy = FALSE}
 model {
     betas ~ normal(0,2);                                                            
     intercept ~ normal(-5,2);                                                     
@@ -388,9 +388,9 @@ However as it turns out we did overlook something crucial here:
 
 >The samples we have observed for uncensored survival times are in fact all conditioned to be less equal the length of the study
 
-It is crucial to understand this fact: Even if the samples are uncensored, since our experiment only ran for a (hopefully pre-defined) length, we only observe survival (and censored) times that are less equal the length of the study. On the other hand our generative model does create samples on the unconstrained domain of our posterior predictive distribution. We therefore need to adjust the `generative quantities` block to generate survival times conditioned to be less equal the length of the study (in this case 255 months, see above). We do this here by simple rejection sampling:
+It is crucial to understand this fact: Even if the samples are uncensored, since our experiment only ran for a (hopefully pre-defined) length, we only observe survival (and censored) times that are less equal the length of the study. On the other hand our generative model does create samples on the unconstrained domain of our posterior predictive distribution. We therefore need to adjust the `generative quantities` block to generate survival times conditioned^[One might call this also sampling from a truncated event time distribution, see [this](https://discourse.mc-stan.org/t/survival-models-in-rstanarm/3998/64?u=ermeel) comment on Stan discourse.] to be less equal the length of the study (in this case 255 months, see above).  One approach to achieve this it to use simple rejection sampling:
 
-```{rstan  generated_quantities_block2}
+```{stan output.var='dump', eval = FALSE, tidy = FALSE}
 generated quantities {
     vector[N_uncensored] times_uncensored_sampled;
     {
@@ -427,4 +427,36 @@ ppc_stat(surv_times_train, surv_times_rep2, binwidth = 1, stat = "mean")
 ppc_stat(surv_times_train, surv_times_rep2, binwidth = 1, stat = "sd")
 ppc_stat(surv_times_train, surv_times_rep2, binwidth = 1, stat = "max")
 ppc_stat(surv_times_train, surv_times_rep2, binwidth = 1, stat = "min")
+```
+
+As was pointed out in [this](https://discourse.mc-stan.org/t/survival-models-in-rstanarm/3998/66?u=ermeel) comment on Stan discourse by the user [lcomm](https://discourse.mc-stan.org/u/lcomm/summary), one can directly sample from an exponential distribution with upper bound using the following Stan function^[This needs to be added to functions-block at the beginning of the Stan file.]
+
+```{stan output.var='dump', eval = FALSE, tidy = FALSE}
+real exponential_ub_rng(real beta, real ub) {
+    real p = exponential_cdf(ub, beta);  // cdf for bounds
+    real u = uniform_rng(0, p);
+    return (-log1m(u) / beta);  // inverse cdf for value
+  }
+```
+
+Our `generated quantities` block would then look as follows
+
+```{stan output.var='dump', eval = FALSE, tidy = FALSE}
+
+generated quantities {
+    vector[N_uncensored] times_uncensored_sampled;
+    for(i in 1:N_uncensored) times_uncensored_sampled[i] = exponential_ub_rng(exp(intercept+X_uncensored[i,]*betas), max_time);
+}
+```
+
+and we moved the calculation of `max_time` to the following `transformed data` block:
+
+```{stan output.var='dump', eval=FALSE, tidy=FALSE}
+transformed data {
+    real max_time;
+    real max_time_censored;
+    max_time = max(times_uncensored);
+    max_time_censored = max(times_censored);
+    if(max_time_censored > max_time) max_time = max_time_censored;
+}
 ```
